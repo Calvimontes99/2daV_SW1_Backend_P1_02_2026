@@ -1,7 +1,7 @@
 import { response } from '../middlewares/catchedAsync.js';
 import { getSalaById } from '../models/sala.model.js';
 import { puedeAccederASala } from '../libs/salaAccess.js';
-import { generarEap, puedeEscribirEap } from '../eap/exportarEap.js';
+import { generarEap, kitEap, puedeEscribirEap } from '../eap/exportarEap.js';
 import { sanitizarNombreProyecto } from './crearPagina.controller.clean.js';
 
 /** POST /apis/crearPagina/exportarEAP/:id → proyecto .EAP de Enterprise Architect con el diagrama. */
@@ -23,9 +23,17 @@ export const exportarEapDesdeSala = async (req, res) => {
         const nodes = Array.isArray(tablero.nodes) ? tablero.nodes : Object.values(tablero.nodes || tablero.elements || {});
         const edges = Array.isArray(tablero.edges) ? tablero.edges : Object.values(tablero.edges || tablero.connections || {});
 
+        const nombre = sanitizarNombreProyecto(sala.title);
+        if (!puedeEscribirEap()) {
+            // Servidor sin Windows (Render): el diagrama sale preparado para generarlo con doble clic
+            const kit = await kitEap({ nodes, edges }, sala.title, nombre);
+            res.setHeader('Content-Type', 'application/zip');
+            res.setHeader('Content-Disposition', `attachment; filename="${nombre}-generar-eap.zip"`);
+            return res.send(kit);
+        }
         const eap = await generarEap({ nodes, edges }, sala.title);
         res.setHeader('Content-Type', 'application/vnd.ms-access');
-        res.setHeader('Content-Disposition', `attachment; filename="${sanitizarNombreProyecto(sala.title)}.eap"`);
+        res.setHeader('Content-Disposition', `attachment; filename="${nombre}.eap"`);
         return res.send(eap);
     } catch (error) {
         return response(res, error.statusCode || 500, {
