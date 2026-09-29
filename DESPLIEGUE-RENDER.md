@@ -4,7 +4,7 @@ Todo se publica en **un solo servicio web** de Render más una base PostgreSQL:
 
 - el backend (este repo) sirve la API (`/apis/...`), la colaboración en tiempo real (`/socket.io`)
   y el frontend compilado;
-- el frontend (repo `Calvimontes99/SW1_Frontend_P1_02_2026`, público) se clona y compila durante el build.
+- el frontend (repo `Calvimontes99/2daV_SW1_Frontend_P1_02_2026`, público) se clona y compila durante el build.
 
 No se usa Vercel ni un sitio estático aparte: con todo en la misma URL la cookie de sesión funciona
 en cualquier navegador (también Safari/iPhone), no hay que configurar CORS y Socket.IO mantiene su
@@ -15,7 +15,7 @@ La configuración está en [`render.yaml`](render.yaml).
 ## 1. Crear el servicio (una sola vez)
 
 1. Entrar a <https://dashboard.render.com> con la cuenta de GitHub **Calvimontes99**.
-2. **New > Blueprint** y elegir el repo `SW1_Backend_P1_02_2026` (rama `main`).
+2. **New > Blueprint** y elegir el repo `2daV_SW1_Backend_P1_02_2026` (rama `main`).
 3. Render lee `render.yaml` y muestra lo que va a crear: el servicio `diagramador-uml` y la base
    `diagramador-db`. Pide un solo dato:
    - `GEMINI_API_KEYS`: las claves de Gemini separadas por coma. Si se deja vacía, la app funciona

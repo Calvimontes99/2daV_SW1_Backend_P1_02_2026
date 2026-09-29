@@ -16,7 +16,7 @@ services:
     # intenta descargar binarios CUDA en Linux; la IA local corre en el navegador y no los usa.
     buildCommand: >-
       rm -rf .frontend &&
-      git clone --depth 1 --branch main https://github.com/Calvimontes99/SW1_Frontend_P1_02_2026.git .frontend &&
+      git clone --depth 1 --branch main https://github.com/Calvimontes99/2daV_SW1_Frontend_P1_02_2026.git .frontend &&
       ONNXRUNTIME_NODE_INSTALL=skip npm ci --prefix .frontend --include=dev &&
       npm run build --prefix .frontend &&
       npm ci --omit=dev
