@@ -1,0 +1,36 @@
+{
+  "nodes": [
+    { "id": "ejercicio", "type": "classNode", "position": { "x": 0, "y": 0 },
+      "data": { "className": "Ejercicio", "attributes": ["id: int", "nombre: string"], "methods": [] } },
+    { "id": "objetivo", "type": "classNode", "position": { "x": 700, "y": 0 },
+      "data": { "className": "Objetivo", "attributes": ["id: int", "nombre: string"], "methods": [] } },
+    { "id": "assoc-node-plan", "type": "classNode", "position": { "x": 350, "y": 250 },
+      "data": { "className": "Plan", "attributes": ["series: int", "repeticiones: int", "descripción: string"], "methods": [],
+        "isAssociationClass": true, "associatedEdgeId": "conforma" } },
+    { "id": "entrenador", "type": "classNode", "position": { "x": 0, "y": 600 },
+      "data": { "className": "Entrenador", "attributes": ["id: int", "nombre: string"], "methods": [] } },
+    { "id": "cliente", "type": "classNode", "position": { "x": 700, "y": 600 },
+      "data": { "className": "Cliente", "attributes": ["id: int", "nombre: string"], "methods": [] } },
+    { "id": "assoc-node-contrato", "type": "classNode", "position": { "x": 350, "y": 850 },
+      "data": { "className": "Contrato", "attributes": ["fechaInicio: Date", "monto: double"], "methods": [],
+        "isAssociationClass": true, "associatedEdgeId": "atiende" } },
+    { "id": "dia", "type": "classNode", "position": { "x": 0, "y": 1200 },
+      "data": { "className": "Día", "attributes": ["id: int", "nombre: string", "año: int"], "methods": [] } },
+    { "id": "sesion", "type": "classNode", "position": { "x": 700, "y": 1200 },
+      "data": { "className": "Sesión", "attributes": ["id: int", "duración: int", "nota de progreso: string"], "methods": [] } }
+  ],
+  "edges": [
+    { "id": "conforma", "source": "ejercicio", "target": "objetivo", "type": "umlEdge",
+      "data": { "type": "Association", "startLabel": "*", "endLabel": "*", "label": "conforma",
+        "hasAssociationClass": true, "associationClassId": "assoc-node-plan", "associationClassNodeId": "assoc-node-plan" } },
+    { "id": "assoc-edge-plan", "source": "assoc-node-plan", "target": "objetivo", "type": "umlEdge",
+      "data": { "type": "AssociationClassConnection", "isAssociationConnection": true, "parentRelationId": "conforma", "label": "" } },
+    { "id": "atiende", "source": "entrenador", "target": "cliente", "type": "umlEdge",
+      "data": { "type": "Association", "startLabel": "1", "endLabel": "*", "label": "atiende",
+        "hasAssociationClass": true, "associationClassId": "assoc-node-contrato", "associationClassNodeId": "assoc-node-contrato" } },
+    { "id": "assoc-edge-contrato", "source": "assoc-node-contrato", "target": "cliente", "type": "umlEdge",
+      "data": { "type": "AssociationClassConnection", "isAssociationConnection": true, "parentRelationId": "atiende", "label": "" } },
+    { "id": "tiene", "source": "dia", "target": "sesion", "type": "umlEdge",
+      "data": { "type": "Composition", "startLabel": "1", "endLabel": "*" } }
+  ]
+}

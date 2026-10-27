@@ -102,6 +102,9 @@ export const etiquetaCampo = (texto) => {
     return legible.charAt(0).toUpperCase() + legible.slice(1);
 };
 
+/** Título de una clase: el nombre como se dibujó ("Día") si el del código cambió ("Dia"). */
+export const etiquetaEntidad = (entidad) => entidad?.etiqueta || etiquetaCampo(entidad?.name ?? '');
+
 /** Contenido seguro para un literal Dart entre comillas simples. */
 export const textoDart = (s) => String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\$/g, '\\$');
 

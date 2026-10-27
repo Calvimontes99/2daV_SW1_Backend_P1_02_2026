@@ -2,6 +2,7 @@ import { clienteGemini } from '../libs/geminiRotacion.js';
 import { mensajeErrorIA } from '../libs/mensajesError.js';
 import { generarConDeepSeek, hayClaveDeepSeek } from '../libs/deepseek.js';
 import { generarConOllama, hayOllama } from '../libs/ollama.js';
+import { extraerJSON } from '../colaboracion/jsonIA.js';
 
 // Cliente de Gemini que rota las API keys configuradas (GEMINI_API_KEYS / GEMINI_API_KEY)
 const genAI = clienteGemini;
@@ -822,18 +823,10 @@ IMAGEN ADJUNTA: el usuario envió una foto o captura (diagrama dibujado, pizarra
 
             const text = genResult.text;
 
-            // Parse JSON response
-            let aiResponse;
-            try {
-                aiResponse = JSON.parse(text);
-            } catch (parseError) {
-                const jsonMatch = text.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                    aiResponse = JSON.parse(jsonMatch[0]);
-                } else {
-                    throw new Error('La respuesta de AI no contiene JSON válido');
-                }
-            }
+            // El modelo a veces escapa como en markdown (\*) o deja comas finales: se repara antes
+            // de rendirse (antes un solo "\*" hacía fallar la propuesta entera)
+            const aiResponse = extraerJSON(text);
+            if (!aiResponse) throw new Error('La respuesta de AI no contiene JSON válido');
 
 
 

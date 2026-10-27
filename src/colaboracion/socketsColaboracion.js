@@ -5,6 +5,7 @@
  *   chat:historial    { salaId, despuesDe?, actualizadosDesde? }  ack { mensajes, hayAnteriores, propuestas, ia, marca }
  *   chat:anteriores   { salaId, canal, antesDe }        ack { mensajes, hayMas }   canal: equipo | ia
  *   chat:enviar       { salaId, texto, paraIA }         ack { ok, mensaje }
+ *   chat:importar     { salaId, mensajes: [...] }       ack { ok, aceptados: [idLocal] }   lo escrito sin conexión
  * Cada mensaje trae su canal: 'equipo' (entre personas) o 'ia' (pedidos a la IA y sus respuestas).
  *   propuesta:decidir { salaId, propuestaId, decision } ack { ok, mensaje? }   decision: aceptar | rechazar
  *   historial:listar  { salaId, autor? }                ack { cambios }
@@ -16,10 +17,49 @@
 import { decidirPropuesta, estadoIA, pedirALaIA } from './iaSala.js';
 import { avisarIntegrantes } from './notificacionesPush.js';
 import {
-    CANALES, guardarMensaje, leerUltimaVisita, listarCambios, listarMensajes, listarPropuestas, marcarVisita, mensajesDesde, marcaDeTiempo,
+    CANALES, guardarMensaje, importarMensaje, leerUltimaVisita, listarCambios, listarMensajes, listarPropuestas, marcarVisita, mensajesDesde, marcaDeTiempo,
 } from './repositorio.js';
 
 export const LIMITE_TEXTO = 4000;
+const MAX_IMPORTAR = 200;
+const ID_LOCAL = /^[A-Za-z0-9:_-]{1,80}$/;
+const textoCorto = (v, max = 120) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
+
+/**
+ * Un mensaje escrito sin conexión, validado. El autor sale de la sesión (no del navegador). Lo que
+ * "dijo" la IA local queda como de la IA local DE esa persona: la IA compartida no lo dijo.
+ */
+export const filaSinConexion = (m, autor) => {
+    if (!m || typeof m !== 'object' || !ID_LOCAL.test(String(m.idLocal || ''))) return null;
+    const texto = String(m.texto || '').trim().slice(0, LIMITE_TEXTO);
+    if (!texto || !['usuario', 'ia'].includes(m.tipo)) return null;
+    const escrito = Date.parse(m.escritoEn);
+    // Nunca en el futuro (un reloj adelantado no debe ordenar mal el chat)
+    const escritoEn = new Date(Number.isNaN(escrito) ? Date.now() : Math.min(escrito, Date.now())).toISOString();
+    const d = m.datos && typeof m.datos === 'object' ? m.datos : {};
+    const base = { sinConexion: true, escritoEn };
+    if (m.tipo === 'ia') {
+        return {
+            idLocal: m.idLocal, tipo: 'ia', texto, autorId: null, autorNombre: 'IA local',
+            datos: {
+                ...base, proveedor: 'IA local', pedidoPor: autor.nombre, pedidoPorId: autor.id ?? null,
+                ...(textoCorto(d.motor, 40) ? { motor: textoCorto(d.motor, 40) } : {}),
+                ...(textoCorto(d.modeloUsado, 80) ? { modeloUsado: textoCorto(d.modeloUsado, 80) } : {}),
+                ...(Number.isInteger(d.cambios) && d.cambios >= 0 ? { cambios: Math.min(d.cambios, 10000) } : {}),
+            },
+        };
+    }
+    const paraIA = m.canal === 'ia' || d.paraIA === true;
+    return {
+        idLocal: m.idLocal, tipo: 'usuario', texto, autorId: autor.id ?? null, autorNombre: autor.nombre,
+        datos: {
+            ...base,
+            ...(paraIA ? { paraIA: true } : {}),
+            ...(d.deAudio === true ? { deAudio: true } : {}),
+            ...(textoCorto(d.imagen?.nombre) ? { imagen: { nombre: textoCorto(d.imagen.nombre) } } : {}),
+        },
+    };
+};
 
 /** ¿El texto le habla a la IA? (@IA al comienzo o en cualquier parte) */
 export const mencionaALaIA = (texto) => /(^|\s)@ia\b/i.test(texto);
@@ -146,6 +186,43 @@ export const registrarEventosColaboracion = (io, socket, autorDe) => {
             responder(ack, { ok: true, mensaje });
         } catch (error) {
             responder(ack, { ok: false, mensaje: error.message === 'El mensaje está vacío.' ? error.message : 'No se pudo enviar el mensaje.' });
+        }
+    });
+
+    /**
+     * Lo que se escribió SIN CONEXIÓN (mensajes al equipo, pedidos a la IA local y lo que respondió):
+     * al volver se comparte con la sala para que todos sepan qué se hizo. No se le pide nada a la IA
+     * compartida (ya lo resolvió la IA local) y cada mensaje se guarda una sola vez (id local).
+     */
+    socket.on('chat:importar', async ({ salaId, mensajes } = {}, ack) => {
+        const id = enSala(salaId);
+        const autor = autorDe();
+        if (!id || !autor) return responder(ack, { ok: false, mensaje: 'Se perdió la conexión con el tablero.' });
+        if (!Array.isArray(mensajes) || mensajes.length > MAX_IMPORTAR) {
+            return responder(ack, { ok: false, mensaje: `Se pueden subir hasta ${MAX_IMPORTAR} mensajes por vez.` });
+        }
+        const aceptados = [];
+        const guardados = [];
+        try {
+            for (const crudo of mensajes) {
+                const fila = filaSinConexion(crudo, autor);
+                if (!fila) continue;
+                const { mensaje, nuevo } = await importarMensaje({ salaId: id, ...fila });
+                if (!mensaje) continue;
+                aceptados.push(fila.idLocal);
+                if (nuevo) {
+                    guardados.push(mensaje);
+                    io.to(`sala_${id}`).emit('chat:nuevo', mensaje);
+                }
+            }
+            if (guardados.length) {
+                avisarIntegrantes(id, autor.nombre, `compartió ${guardados.length} mensaje${guardados.length === 1 ? '' : 's'} escrito${guardados.length === 1 ? '' : 's'} sin conexión`, { excepto: autor.id });
+            }
+            responder(ack, { ok: true, aceptados, guardados: guardados.length });
+        } catch (error) {
+            console.error('chat:importar', error.message);
+            // Lo aceptado hasta el error ya quedó guardado: el resto se reintenta
+            responder(ack, { ok: false, aceptados, mensaje: 'No se pudo compartir lo escrito sin conexión.' });
         }
     });
 

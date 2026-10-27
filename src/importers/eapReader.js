@@ -23,6 +23,9 @@ const TIPOS_CONECTOR = new Set([
 ]);
 const TABLAS_REQUERIDAS = ['t_object', 't_package', 't_connector', 't_attribute', 't_diagram', 't_diagramobjects'];
 const VISIBILIDADES = ['public', 'private', 'protected', 'package'];
+// Clase de asociación: EA guarda la clase con NType = 17 y el id de su conector en
+// PDATA4, y la asociación con SubType = "Class" y el id de la clase en PDATA1
+const NTYPE_CLASE_ASOCIACION = 17;
 
 const texto = (v) => (v == null ? '' : String(v).trim());
 const entero = (v) => {
@@ -66,13 +69,19 @@ export function leerModeloEAP(buffer) {
 
     // Jet no distingue mayúsculas en los nombres de columna y las versiones de
     // EA no siempre coinciden: se normalizan a minúsculas.
-    const filas = (nombre) => {
+    return modeloDesdeTablas((nombre) => {
         if (!tablas.has(nombre)) return [];
         return reader.getTable(nombre).getData().map((fila) =>
             Object.fromEntries(Object.entries(fila).map(([k, v]) => [k.toLowerCase(), v]))
         );
-    };
+    });
+}
 
+/**
+ * Arma el modelo con las filas de las tablas de EA.
+ * @param {(tabla: string) => Array<Object>} filas filas de una tabla, con las columnas en minúsculas
+ */
+export function modeloDesdeTablas(filas) {
     const paquetes = filas('t_package').map((p) => ({
         id: entero(p.package_id),
         nombre: texto(p.name),
@@ -123,14 +132,33 @@ export function leerModeloEAP(buffer) {
         };
     });
 
-    const conectores = filas('t_connector')
-        .filter((c) =>
-            TIPOS_CONECTOR.has(texto(c.connector_type)) &&
-            idsClase.has(entero(c.start_object_id)) &&
-            idsClase.has(entero(c.end_object_id))
-        )
-        .map((c) => ({
-            id: entero(c.connector_id),
+    const filasConector = filas('t_connector').filter((c) =>
+        TIPOS_CONECTOR.has(texto(c.connector_type)) &&
+        idsClase.has(entero(c.start_object_id)) &&
+        idsClase.has(entero(c.end_object_id))
+    );
+
+    // Conector -> su clase de asociación. Basta con que lo diga uno de los dos lados
+    const claseDeConector = new Map();
+    const idsConector = new Set(filasConector.map((c) => entero(c.connector_id)));
+    for (const o of objetos) {
+        const conector = entero(o.pdata4);
+        if (entero(o.ntype) === NTYPE_CLASE_ASOCIACION && idsConector.has(conector)) {
+            claseDeConector.set(conector, entero(o.object_id));
+        }
+    }
+    for (const c of filasConector) {
+        const clase = entero(c.pdata1);
+        if (texto(c.subtype).toLowerCase() === 'class' && idsClase.has(clase)) {
+            claseDeConector.set(entero(c.connector_id), clase);
+        }
+    }
+
+    const conectores = filasConector.map((c) => {
+        const id = entero(c.connector_id);
+        const claseAsociacion = claseDeConector.get(id);
+        return {
+            id,
             tipo: texto(c.connector_type),
             subtipo: texto(c.subtype),
             nombre: texto(c.name),
@@ -143,7 +171,11 @@ export function leerModeloEAP(buffer) {
             // 0 = ninguno, 1 = agregación, 2 = composición; marca el extremo "todo" (rombo)
             agregadoOrigen: entero(c.sourceisaggregate),
             agregadoDestino: entero(c.destisaggregate),
-        }));
+            // Id de la clase de asociación (línea punteada hacia la relación), si tiene
+            claseAsociacion: claseAsociacion && claseAsociacion !== entero(c.start_object_id) &&
+                claseAsociacion !== entero(c.end_object_id) ? claseAsociacion : null,
+        };
+    });
 
     const objetosPorDiagrama = agrupar(
         filas('t_diagramobjects').filter((d) => idsClase.has(entero(d.object_id))),

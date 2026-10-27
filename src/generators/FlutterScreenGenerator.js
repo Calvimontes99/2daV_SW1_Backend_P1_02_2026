@@ -1,4 +1,4 @@
-import { archivoServicio, claseServicio } from './FlutterNombres.js';
+import { archivoServicio, claseServicio, etiquetaEntidad } from './FlutterNombres.js';
 import {
     archivoDart, atributoDescriptivo, atributosDTO, campoJava, claveDeAtributo, claveMuchosAMuchos,
     esHora, esSoloFecha, etiquetaCampo, identificadorDart, largoMaximo, muchosAMuchosPropios,
@@ -57,7 +57,7 @@ class FlutterScreenGenerator {
         if (descriptivo) {
             return `'\${${variable}.${pk.nombre}} - \${${variable}.${this.campo(descriptivo)} ?? ''}'`;
         }
-        return `'${textoDart(etiquetaCampo(refEntity.name))} #\${${variable}.${pk.nombre}}'`;
+        return `'${textoDart(etiquetaEntidad(refEntity))} #\${${variable}.${pk.nombre}}'`;
     }
 
     generateHomeScreen(nombreApp) {
@@ -70,7 +70,7 @@ class FlutterScreenGenerator {
             ...entidades.map(e => `import '${archivoDart(e.name)}_list_screen.dart';`)
         ].join('\n');
         const entradas = entidades.map(e =>
-            `      if (${this.permiso(e.name, 'ver')}) _Entrada('${textoDart(etiquetaCampo(e.name))}', () => const ${nombreClase(e.name)}ListScreen()),`
+            `      if (${this.permiso(e.name, 'ver')}) _Entrada('${textoDart(etiquetaEntidad(e))}', () => const ${nombreClase(e.name)}ListScreen()),`
         ).join('\n');
         return `import 'package:flutter/material.dart';
 
@@ -157,7 +157,7 @@ class _Entrada {
     generateListScreen(entity) {
         const clase = nombreClase(entity.name);
         const archivo = archivoDart(entity.name);
-        const titulo = textoDart(etiquetaCampo(entity.name));
+        const titulo = textoDart(etiquetaEntidad(entity));
         const pk = this.campoPk(entity);
         const atributos = this.atributos(entity);
         const descriptivo = atributoDescriptivo(atributos);
@@ -396,7 +396,7 @@ ${ayudaFecha}
     generateFormScreen(entity) {
         const clase = nombreClase(entity.name);
         const archivo = archivoDart(entity.name);
-        const titulo = textoDart(etiquetaCampo(entity.name));
+        const titulo = textoDart(etiquetaEntidad(entity));
         const pk = this.campoPk(entity);
         const conApi = new Set(this.entidadesConApi.map(e => e.name));
         const buscar = (nombre) => this.entities.find(e => e.name === nombre);

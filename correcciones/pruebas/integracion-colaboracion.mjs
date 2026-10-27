@@ -272,6 +272,42 @@ try {
     assert.ok(viejosEquipo.mensajes.some((m) => m.id === deEquipo.id) && viejosEquipo.mensajes.every((m) => m.canal === 'equipo'));
     paso('chat del equipo y chat de la IA: cada mensaje con su canal y cada uno se pagina aparte');
 
+    // ── Sin conexión: lo escrito y lo que hizo la IA local se comparte al volver, una sola vez ──
+    const otroVe = evento(s3, 'chat:nuevo', (m) => m.idLocal === 'sc-prueba-2');
+    const offline = [
+      { idLocal: 'sc-prueba-1', canal: 'equipo', tipo: 'usuario', texto: 'avancé sin internet', escritoEn: '2026-10-25T10:00:00.000Z' },
+      { idLocal: 'sc-prueba-2', canal: 'ia', tipo: 'usuario', texto: 'agrega la clase Sucursal', escritoEn: '2026-10-25T10:01:00.000Z', datos: { paraIA: true } },
+      { idLocal: 'sc-prueba-3', canal: 'ia', tipo: 'ia', texto: '💻 Hecho con la IA local: agregó Sucursal', escritoEn: '2099-01-01T00:00:00.000Z', datos: { motor: 'interprete', cambios: 1 } },
+      { idLocal: 'id inválido!', canal: 'equipo', tipo: 'usuario', texto: 'se descarta' },
+    ];
+    const subida = await ack(s3, 'chat:importar', { salaId, mensajes: offline });
+    assert.equal(subida.ok, true);
+    assert.deepEqual(subida.aceptados, ['sc-prueba-1', 'sc-prueba-2', 'sc-prueba-3']);
+    assert.equal(subida.guardados, 3);
+    await otroVe;
+    const reenvioOffline = await ack(s3, 'chat:importar', { salaId, mensajes: offline.slice(0, 3) });
+    assert.deepEqual(reenvioOffline.aceptados, ['sc-prueba-1', 'sc-prueba-2', 'sc-prueba-3'], 'reenviar no falla');
+    assert.equal(reenvioOffline.guardados, 0, 'y no duplica');
+    const filasOffline = (await pool.query(
+        `select id_local, tipo, canal, autor_nombre, datos from "MensajesSala" where sala_id = $1 and id_local like 'sc-prueba-%' order by id`, [salaId])).rows;
+    assert.deepEqual(filasOffline.map((f) => [f.id_local, f.canal]), [['sc-prueba-1', 'equipo'], ['sc-prueba-2', 'ia'], ['sc-prueba-3', 'ia']]);
+    assert.equal(filasOffline[2].autor_nombre, 'IA local');
+    assert.equal(filasOffline[2].datos.sinConexion, true);
+    assert.equal(filasOffline[2].datos.pedidoPor, USUARIOS_PRUEBA[0].name);
+    assert.ok(Date.parse(filasOffline[2].datos.escritoEn) <= Date.now(), 'una fecha futura no desordena el chat');
+    paso('lo escrito sin conexión (equipo, pedido y respuesta de la IA local) se comparte una sola vez');
+
+    // ── Los cambios que hizo la IA local quedan en el historial como de la IA, pedidos por quien la usó ──
+    assert.equal((await ack(s3, 'operaciones', { salaId, lote: { id: 'clienteprueba:4', origen: 'ia-local', ops: [{ op: 'ponerNodo', nodo: clase('S', 'Sucursal', ['id: Long'], 1200) }] } })).ok, true);
+    await esperar(3500); // el historial agrupa ráfagas de 2,5 s
+    const cambioLocal = (await pool.query(
+        `select es_ia, autor_nombre, pedido_por from "CambiosSala" where sala_id = $1 and elemento_id = 'S' order by id desc limit 1`, [salaId])).rows[0];
+    assert.ok(cambioLocal, 'quedó en el historial');
+    assert.equal(cambioLocal.es_ia, true);
+    assert.equal(cambioLocal.autor_nombre, 'IA local');
+    assert.equal(cambioLocal.pedido_por, USUARIOS_PRUEBA[0].name);
+    paso('los cambios de la IA local quedan en "Quién hizo qué" como de la IA (pedido por quien la usó)');
+
     // ── "Pedir ajuste" reemplaza la propuesta anterior (IA real) ──
     if (CON_IA) {
         const propuesta1 = evento(s3, 'propuesta:nueva', () => true, 120000);

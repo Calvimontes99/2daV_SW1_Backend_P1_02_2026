@@ -5,6 +5,7 @@
  * que Enterprise Architect 13 guarda al dibujar a mano: al abrir el .EAP el diagrama de clases
  * aparece armado en el lienzo, con las mismas posiciones que en el tablero.
  */
+import { clasesDeAsociacionDelTablero } from '../libs/clasesAsociacion.js';
 
 const TIPO_RELACION = {
     association: 'asociacion',
@@ -81,12 +82,16 @@ export const especificacionDesdeTablero = (tablero, titulo) => {
         return elemento;
     });
 
+    // Clase de asociación: en EA es una asociación con SubType "Class" unida a su clase
+    const claseDeAsociacion = clasesDeAsociacionDelTablero(tablero?.nodes, tablero?.edges, (id) => ids.has(id));
+
     const relaciones = (tablero?.edges || [])
         .filter(esRelacionDelTablero)
         .filter((e) => ids.has(e.source) && ids.has(e.target) && e.source !== e.target)
         .map((e) => {
             const tipo = TIPO_RELACION[String(e.data?.type || 'Association').toLowerCase()] || 'asociacion';
             const relacion = { tipo, desde: e.source, hacia: e.target };
+            if (tipo === 'asociacion' && claseDeAsociacion.has(e.id)) relacion.claseAsociacion = claseDeAsociacion.get(e.id);
             const nombre = String(e.data?.label ?? '').trim();
             if (nombre) relacion.nombre = nombre;
             // En el editor el rombo va en el destino (el todo), igual que en la especificación

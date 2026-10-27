@@ -1,5 +1,6 @@
 import { restriccionesDe } from '../generators/RestriccionesUML.js';
 import { extraerPermisos } from '../generators/Permisos.js';
+import { etiquetaCampo } from '../generators/FlutterNombres.js';
 import path from 'path';
 import fs from 'fs';
 import archiver from 'archiver';
@@ -11,6 +12,7 @@ import SqlDDLGenerator from '../generators/SqlDDLGenerator.js';
 import os from 'os';
 import { puedeAccederASala } from '../libs/salaAccess.js';
 import { describirProyecto } from '../libs/descripcionProyecto.js';
+import { clasesDeAsociacionDelTablero } from '../libs/clasesAsociacion.js';
 import { escribirPostman } from '../postman/postmanDesdeProyecto.js';
 
 // Portable: configurable por env, con fallback al tmp del sistema (funciona en Windows y Linux)
@@ -39,6 +41,28 @@ export const nombreBaseDatos = (titulo) => {
   const nombre = sanitizarNombreProyecto(titulo).replace(/-/g, '_');
   // Un identificador de PostgreSQL sin comillas no puede empezar por un digito
   return /^[0-9]/.test(nombre) ? `db_${nombre}` : nombre;
+};
+
+/**
+ * Nombres del código generado: sin tildes, eñes, espacios ni símbolos. Java admite "Día", pero
+ * terminaba en la tabla "día", la columna "día_id" y la ruta "/api/día", que fallan o se ven mal
+ * en PostgreSQL, en las URL y en Dart. El nombre que dibujó el usuario queda como etiqueta.
+ * Un nombre que ya es un identificador válido no se toca.
+ */
+const IDENTIFICADOR = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const palabrasAscii = (texto) => String(texto || '')
+  .normalize('NFD')
+  .replace(/\p{Diacritic}/gu, '')
+  .split(/[^A-Za-z0-9]+/)
+  .filter(Boolean);
+
+/** "Día" -> "Dia", "Nota de venta" -> "NotaDeVenta", "Sesión" -> "Sesion" */
+export const identificadorClase = (nombre) => {
+  const limpio = String(nombre || '').trim();
+  if (IDENTIFICADOR.test(limpio)) return limpio;
+  const unido = palabrasAscii(limpio).map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join('');
+  if (!unido) return 'Entidad';
+  return /^[0-9]/.test(unido) ? `Clase${unido}` : unido;
 };
 
 // Defensa en profundidad: nunca operar fuera de rutaBase aunque el saneo falle.
@@ -85,6 +109,7 @@ class CrearPaginaController {
   convertirFrontendADiagramParser = (elements, connections = [], permisosCrudos = null) => {
     const politica = extraerPermisos(elements, connections, permisosCrudos);
     const convertedElements = {};
+    const nombresDeClase = new Set();
     politica.elementos.forEach(node => {
       // Accept frontend nodes which may use 'classNode' and store data under node.data
       const isClassLike = node.type === 'class' || node.type === 'classNode' || (node.data && node.data.className);
@@ -105,7 +130,8 @@ class CrearPaginaController {
               cuerpo = cuerpo.slice(0, igual).trim();
             }
             const parts = cuerpo.split(':').map(s => s.trim());
-            const name = parts[0] || 'field';
+            const original = parts[0] || 'field';
+            const name = this.identificadorAtributo(original);
             const esClave = name.toLowerCase() === 'id';
             // Normalizar el tipo al catalogo que entiende EntityGenerator
             // (antes se pasaba crudo: "double" -> no reconocido -> String).
@@ -115,16 +141,21 @@ class CrearPaginaController {
             const type = this.mapJavaType(tipoDiagrama);
             // text y geometrías -> TEXT, char -> VARCHAR(1): columna y validación lo respetan
             const sqlType = this.sqlTypeDe(tipoDiagrama);
-            return { name, type, sqlType, visibility, defaultValue, isPrimaryKey: esClave, ...reglas };
+            // Si el nombre cambió ("año" -> "ano"), la app muestra el original
+            const etiqueta = reglas.etiqueta ?? (name !== original ? etiquetaCampo(original) : undefined);
+            return { name, type, sqlType, visibility, defaultValue, isPrimaryKey: esClave, ...reglas, ...(etiqueta ? { etiqueta } : {}) };
           }
           const nombreLimpio = restriccionesDe(attr.name);
           const tipoLimpio = restriccionesDe(attr.type);
           const { reglas } = restriccionesDe(`${attr.name || ''} ${attr.type || ''}`);
           const esClavePrimaria = attr.isPrimaryKey === true || nombreLimpio.limpio.toLowerCase() === 'id';
+          const nombreAtributo = this.identificadorAtributo(nombreLimpio.limpio || 'field');
           return {
+            // Si el nombre cambió ("año" -> "ano"), la app muestra el original (salvo etiqueta explícita)
+            ...(nombreLimpio.limpio && nombreAtributo !== nombreLimpio.limpio ? { etiqueta: etiquetaCampo(nombreLimpio.limpio) } : {}),
             ...reglas,
             ...Object.fromEntries(['obligatorio', 'unico', 'minimo', 'maximo', 'etiqueta', 'oculto', 'orden', 'principal'].filter(k => attr[k] !== undefined).map(k => [k, attr[k]])),
-            name: nombreLimpio.limpio || 'field',
+            name: nombreAtributo,
             // Un id sin tipo es la clave numérica que genera la base de datos
             type: this.mapJavaType(tipoLimpio.limpio || (esClavePrimaria ? 'Long' : 'String')),
             sqlType: attr.sqlType || this.sqlTypeDe(tipoLimpio.limpio),
@@ -144,11 +175,16 @@ class CrearPaginaController {
           processedAttributes.unshift({ name: 'id', type: 'Long', sqlType: 'BIGINT', visibility: 'private', isPrimaryKey: true, isForeignKey: false });
         }
 
-        const resolvedName = node.name || (node.data && node.data.className) || 'Entity';
+        const nombreDibujado = node.name || (node.data && node.data.className) || 'Entity';
+        // Sin repetir: "Día" y "Dia" en el mismo diagrama no pueden ser la misma clase Java
+        let resolvedName = identificadorClase(nombreDibujado);
+        for (let n = 2; nombresDeClase.has(resolvedName.toLowerCase()); n++) resolvedName = `${identificadorClase(nombreDibujado)}${n}`;
+        nombresDeClase.add(resolvedName.toLowerCase());
 
         convertedElements[node.id] = {
           id: node.id,
           name: resolvedName,
+          ...(resolvedName !== nombreDibujado ? { etiqueta: nombreDibujado } : {}),
           type: 'class',
           attributes: processedAttributes,
           methods: rawMethods || [],
@@ -160,6 +196,7 @@ class CrearPaginaController {
       }
     });
 
+    const claseDeAsociacion = this.clasesDeAsociacion(politica.elementos, politica.conexiones, convertedElements);
     const convertedConnections = {};
     politica.conexiones.forEach((edge, idx) => {
       if (!edge.source || !edge.target) return;
@@ -169,6 +206,33 @@ class CrearPaginaController {
       // Ignorar conexiones internas de la UI (linea punteada de clase de asociacion,
       // conectores de notas): no son relaciones UML del modelo.
       if (d.isAssociationConnection || d.isNoteConnection) return;
+
+      // Asociación con clase de asociación (OMT): cada enlace entre A y B es una fila de la
+      // clase C, con una clave hacia A y otra hacia B, y los atributos del enlace. Antes C quedaba
+      // suelta y la asociación seguía como si no tuviera clase (se perdían sus atributos).
+      const claseC = claseDeAsociacion.get(edge.id);
+      if (claseC) {
+        const multA = edge.sourceMultiplicity || d.startLabel || '1';
+        const multB = edge.targetMultiplicity || d.endLabel || '1';
+        const extremo = (sufijo, desde, enlacesPorUno, rol) => {
+          convertedConnections[`conn_${idx}_${sufijo}`] = {
+            id: `conn_${idx}_${sufijo}`,
+            type: 'association',
+            source: desde,
+            target: claseC,
+            // Cada A tiene tantos enlaces (filas de C) como B le corresponden, y viceversa
+            sourceMultiplicity: '1',
+            targetMultiplicity: enlacesPorUno,
+            sourceName: rol || '',
+            targetName: '',
+            description: edge.description || d.label || '',
+            claseAsociacion: claseC
+          };
+        };
+        extremo('a', edge.source, multB, edge.sourceName || d.sourceRole);
+        extremo('b', edge.target, multA, edge.targetName || d.targetRole);
+        return;
+      }
 
       convertedConnections[`conn_${idx}`] = {
         id: `conn_${idx}`,
@@ -232,6 +296,8 @@ class CrearPaginaController {
   derivarClavesForaneas = (elements, connections) => {
     const esMuchos = (m) => typeof m === 'string' && m.includes('*');
     const grupos = new Map();
+    // Clase de asociación -> nombres de sus dos claves (un mismo par A-B no se repite)
+    const clavesDeEnlace = new Map();
 
     Object.values(connections).forEach(conn => {
       if (conn.type === 'inheritance') {
@@ -322,11 +388,36 @@ class CrearPaginaController {
           referencedEntity: entidadReferenciada.name,
           referencedField: 'id',
           referencedType: 'Long',
-          // En una composición la parte no existe sin su todo: FK obligatoria
-          isRequired: conn.type === 'composition'
+          // En una composición la parte no existe sin su todo: FK obligatoria. Un enlace de una
+          // clase de asociación no existe sin sus dos extremos.
+          isRequired: conn.type === 'composition' || Boolean(conn.claseAsociacion)
         });
+        if (conn.claseAsociacion) {
+          if (!clavesDeEnlace.has(conn.claseAsociacion)) clavesDeEnlace.set(conn.claseAsociacion, []);
+          clavesDeEnlace.get(conn.claseAsociacion).push(nombreFK);
+        }
       });
     });
+
+    // UML: entre los mismos dos objetos hay como mucho un enlace (salvo {nonunique})
+    clavesDeEnlace.forEach((claves, claseId) => {
+      if (claves.length === 2 && elements[claseId]) elements[claseId].paresUnicos = [claves];
+    });
+  };
+
+  /**
+   * Relación -> clase de asociación, con cualquiera de las tres marcas que deja el tablero: la
+   * relación apunta a su clase, la clase apunta a su relación o la línea punteada une ambas.
+   * Solo cuenta si la clase existe y no es uno de los extremos de la relación.
+   */
+  clasesDeAsociacion = (nodos, aristas, elements) =>
+    clasesDeAsociacionDelTablero(nodos, aristas, (claseId) => !!elements[claseId]);
+
+  /** Nombre de atributo para el código: "año" -> "ano", "nota de progreso" -> "notaDeProgreso" */
+  identificadorAtributo = (nombre) => {
+    const limpio = String(nombre || '').trim();
+    if (IDENTIFICADOR.test(limpio)) return limpio;
+    return this.identificadorJava(limpio) || 'campo';
   };
 
   // Rol o etiqueta de una relacion -> identificador Java en camelCase

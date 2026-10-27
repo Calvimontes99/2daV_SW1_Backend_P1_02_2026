@@ -90,6 +90,10 @@ export const asegurarTablasColaboracion = async () => {
             WHEN tipo <> 'usuario' OR (datos->>'paraIA') = 'true' THEN 'ia' ELSE 'equipo' END
          WHERE canal IS NULL;
         CREATE INDEX IF NOT EXISTS mensajes_sala_canal_idx ON "MensajesSala" (sala_id, canal, id);
+        -- Mensajes escritos sin conexión: el id que les dio el navegador evita guardarlos dos veces
+        -- si se reenvían (se cortó la conexión justo al subirlos, otra pestaña, etc.)
+        ALTER TABLE "MensajesSala" ADD COLUMN IF NOT EXISTS id_local VARCHAR(80);
+        CREATE UNIQUE INDEX IF NOT EXISTS mensajes_sala_id_local_idx ON "MensajesSala" (sala_id, id_local) WHERE id_local IS NOT NULL;
         ALTER TABLE "Salas" ADD COLUMN IF NOT EXISTS resumen_ia TEXT;
         -- Ids de las tandas de operaciones que ya incluye el diagrama guardado (para no repetirlas)
         ALTER TABLE "Salas" ADD COLUMN IF NOT EXISTS lotes_aplicados JSONB;
@@ -106,6 +110,7 @@ const mensajeDeFila = (f) => ({
     autorNombre: f.autor_nombre,
     tipo: f.tipo,
     canal: f.canal || canalDe(f.tipo, f.datos),
+    ...(f.id_local ? { idLocal: f.id_local } : {}),
     texto: f.texto,
     datos: f.datos || null,
     creadoEn: f.creado_en,
@@ -131,6 +136,23 @@ export const actualizarDatosMensaje = async (id, datos) => {
         [id, JSON.stringify(datos)],
     );
     return rows[0] ? mensajeDeFila(rows[0]) : null;
+};
+
+/**
+ * Guarda un mensaje escrito sin conexión. Si ese id local ya estaba (reenvío), no lo repite:
+ * devuelve { mensaje, nuevo: false } con el que ya existía.
+ */
+export const importarMensaje = async ({ salaId, autorId = null, autorNombre = null, tipo, texto, datos = null, idLocal }) => {
+    const { rows } = await pool.query(
+        `INSERT INTO "MensajesSala" (sala_id, autor_id, autor_nombre, tipo, texto, datos, canal, id_local)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (sala_id, id_local) WHERE id_local IS NOT NULL DO NOTHING
+         RETURNING *`,
+        [salaId, autorId, autorNombre, tipo, texto, datos ? JSON.stringify(datos) : null, canalDe(tipo, datos), idLocal],
+    );
+    if (rows[0]) return { mensaje: mensajeDeFila(rows[0]), nuevo: true };
+    const previo = await pool.query('SELECT * FROM "MensajesSala" WHERE sala_id = $1 AND id_local = $2', [salaId, idLocal]);
+    return { mensaje: previo.rows[0] ? mensajeDeFila(previo.rows[0]) : null, nuevo: false };
 };
 
 /**

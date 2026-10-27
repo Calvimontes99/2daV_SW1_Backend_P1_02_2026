@@ -38,8 +38,53 @@ before(async () => {
   await writeFile(path.join(salida, 'manifest.json'), JSON.stringify({ version: 1, salida, casos: [...salidas.values()], fallos: [] }, null, 2));
 });
 
-test('el catálogo incluye ocho tableros reales y siete diagramas difíciles', () => {
-  assert.deepEqual([...salidas.keys()].sort(), ['tienda', 'biblioteca', 'clinica', 'academico', 'bancario', 'gimnasio', 'gimnasio-permisos', 'salud', 'nombres-conflictivos', 'relaciones-opcionales', 'validaciones', 'herencia-profunda', 'fechas-y-horas', 'permisos', 'permisos-mn'].sort());
+test('el catálogo incluye ocho tableros reales y ocho diagramas difíciles', () => {
+  assert.deepEqual([...salidas.keys()].sort(), ['tienda', 'biblioteca', 'clinica', 'academico', 'bancario', 'gimnasio', 'gimnasio-permisos', 'salud', 'nombres-conflictivos', 'relaciones-opcionales', 'validaciones', 'herencia-profunda', 'fechas-y-horas', 'permisos', 'permisos-mn', 'clase-asociacion-tildes'].sort());
+});
+
+test('clase de asociación: Plan enlaza Ejercicio y Objetivo con sus atributos y un par único', async () => {
+  const plan = await leer('clase-asociacion-tildes', java('entities/Plan.java'));
+  assert.match(plan, /uniqueConstraints = \{@UniqueConstraint\(columnNames = \{"ejercicio_id", "objetivo_id"\}\)\}/);
+  assert.match(plan, /@JoinColumn\(name = "ejercicio_id", nullable = false\)\s+@JsonIgnoreProperties[^\n]*\s+private Ejercicio ejercicio;/);
+  assert.match(plan, /@JoinColumn\(name = "objetivo_id", nullable = false\)\s+@JsonIgnoreProperties[^\n]*\s+private Objetivo objetivo;/);
+  assert.match(plan, /private Integer series;/);
+  const ejercicio = await leer('clase-asociacion-tildes', java('entities/Ejercicio.java'));
+  assert.doesNotMatch(ejercicio, /@ManyToMany|@JoinTable/, 'la asociación va por Plan, no por una tabla intermedia sin atributos');
+  assert.match(ejercicio, /@OneToMany\(mappedBy = "ejercicio"[^)]*\)[\s\S]*?List<Plan> plans/);
+  // 1..* con clase: Contrato también enlaza a los dos extremos
+  const contrato = await leer('clase-asociacion-tildes', java('entities/Contrato.java'));
+  assert.match(contrato, /private Entrenador entrenador;/);
+  assert.match(contrato, /private Cliente cliente;/);
+  const cliente = await leer('clase-asociacion-tildes', java('entities/Cliente.java'));
+  assert.doesNotMatch(cliente, /private Entrenador entrenador;/, 'la clave del enlace vive en Contrato');
+  // La siembra no repite pares (la tabla no los admite)
+  const siembra = await leer('clase-asociacion-tildes', java('config/DatosDemo.java'));
+  const pares = [...siembra.matchAll(/plan(\d+)\.setEjercicio\(\w+\.get\((\d+)\)\);\s+plan\1\.setObjetivo\(\w+\.get\((\d+)\)\);/g)]
+    .map(m => `${m[2]}-${m[3]}`);
+  assert.ok(pares.length > 0, 'se siembran enlaces');
+  assert.equal(new Set(pares).size, pares.length);
+});
+
+test('tildes y eñes: clases, tablas, columnas y rutas en ASCII; la app muestra el nombre dibujado', async () => {
+  const entidades = await readdir(path.join(salidas.get('clase-asociacion-tildes').spring, java('entities')));
+  assert.ok(entidades.includes('Dia.java') && entidades.includes('Sesion.java'));
+  assert.ok(!entidades.some(n => /[^\x20-\x7E]/.test(n)), 'ningún archivo con tilde');
+  const dia = await leer('clase-asociacion-tildes', java('entities/Dia.java'));
+  assert.match(dia, /@Table\(name = "dia"\)/);
+  assert.match(dia, /@Column\(name = "ano"/);
+  const sesion = await leer('clase-asociacion-tildes', java('entities/Sesion.java'));
+  assert.match(sesion, /@JoinColumn\(name = "dia_id"/);
+  assert.match(sesion, /private String notaDeProgreso;/);
+  const controlador = await leer('clase-asociacion-tildes', java('controllers/DiaController.java'));
+  assert.match(controlador, /@RequestMapping\("\/api\/dia"\)/);
+  const inicio = await leer('clase-asociacion-tildes', 'lib/screens/home_screen.dart', 'flutter');
+  assert.match(inicio, /_Entrada\('Día'/);
+  assert.match(inicio, /_Entrada\('Sesión'/);
+  // Un nombre que ya es válido no cambia (regresión de los demás tableros)
+  const convertido = controller.convertirFrontendADiagramParser(
+    [{ id: 'a', type: 'classNode', data: { className: 'NotaVenta', attributes: ['fecha_pago: Date', 'montoTotal: double'] } }], []);
+  assert.equal(convertido.elements.a.name, 'NotaVenta');
+  assert.deepEqual(convertido.elements.a.attributes.map(a => a.name), ['id', 'fecha_pago', 'montoTotal']);
 });
 
 test('01: Usuario conserva su atributo y su tipo de ID; la cuenta de acceso ocupa otra tabla', async () => {

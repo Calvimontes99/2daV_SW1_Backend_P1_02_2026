@@ -10,6 +10,7 @@
  */
 import AIEditorController from '../controllers/ai.editor.controller.js';
 import { conCandado } from './candado.js';
+import { extraerJSON, textoLegible } from './jsonIA.js';
 import {
     aplicarOperaciones, describirOperacion, diagramaComoTexto, nombresPorId, operacionesPropuestas,
 } from './diagramaSemantico.js';
@@ -67,14 +68,6 @@ const modelosRapidos = () => String(process.env.IA_SALA_MODELS || 'gemini-2.5-fl
 
 /** Pedido de texto con toda la cadena de respaldo (Gemini → DeepSeek → Ollama). */
 const generar = (prompt, rapido = true) => AIEditorController._generateUsingModels(rapido ? modelosRapidos() : modelos(), prompt);
-
-const extraerJSON = (texto) => {
-    const limpio = String(texto || '').replace(/```(?:json)?/gi, '').trim();
-    try { return JSON.parse(limpio); } catch { /* sigue */ }
-    const m = limpio.match(/\{[\s\S]*\}/);
-    if (m) { try { return JSON.parse(m[0]); } catch { /* sigue */ } }
-    return null;
-};
 
 const hora = (fecha) => new Date(fecha).toLocaleString('es-BO', {
     timeZone: process.env.ZONA_HORARIA || 'America/La_Paz', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
@@ -244,7 +237,8 @@ const atender = async (salaId, pedido, autor, extras = {}) => {
         : contexto;
     const { model, text } = await generar(prompt);
     const proveedor = nombreProveedor(model);
-    const r = extraerJSON(text) || { tipo: 'respuesta', texto: String(text || '').trim() };
+    // Si no se pudo leer como JSON se responde con su texto, nunca con el JSON crudo
+    const r = extraerJSON(text) || { tipo: 'respuesta', texto: textoLegible(text) };
     const tipo = propuestaAAjustar ? 'cambios' : (['respuesta', 'cambios', 'revision', 'idea'].includes(r.tipo) ? r.tipo : 'respuesta');
     const decir = String(r.texto || '').trim() || 'Listo.';
     const base = { proveedor, respondeA: pedido.id, pedidoPor: quien, tipoRespuesta: tipo };

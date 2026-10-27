@@ -141,6 +141,11 @@ class SqlDDLGenerator {
             }
 
             cols.push(`    CONSTRAINT pk_${tabla} PRIMARY KEY (id)`);
+            // Clase de asociación: el mismo par de objetos no se enlaza dos veces (igual que JPA)
+            (entidad.paresUnicos || []).forEach((par, i) => {
+                const columnas = par.map((n) => { const c = toSnakeCase(n); return c.endsWith('_id') ? c : `${c}_id`; });
+                cols.push(`    CONSTRAINT uk_${tabla}_${i + 1} UNIQUE (${columnas.join(', ')})`);
+            });
 
             lineas.push(`CREATE TABLE ${tabla} (`);
             lineas.push(cols.join(',\n'));

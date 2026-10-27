@@ -243,6 +243,7 @@ export const datosDemo = (nombreApp, entidades, relaciones = [], catalogo = enti
     const valoresUnicosUsados = new WeakMap();
     const orden = ordenarPorDependencias(sembrables);
     const listaDe = new Map();      // nombre de clase -> variable con la lista ya guardada
+    const cantidadDe = new Map();   // nombre de clase -> cuántas filas de ejemplo se guardaron
     const repositorios = [];        // [{ tipo, variable }]
     const bloques = [];
     const enlaces = [];
@@ -269,9 +270,21 @@ export const datosDemo = (nombreApp, entidades, relaciones = [], catalogo = enti
         const foraneos = heredados
             .filter((a) => a.isForeignKey && a.referencedEntity && listaDe.has(a.referencedEntity));
 
+        // Clase de asociación: cada fila enlaza un par distinto (la tabla no admite repetidos)
+        const par = (entidad.paresUnicos || [])
+            .map((nombres) => nombres.map((n) => foraneos.find((a) => a.name === n)))
+            .find((attrs) => attrs.length === 2 && attrs.every(Boolean)) || null;
+        const tamanos = par ? par.map((a) => cantidadDe.get(a.referencedEntity) || 0) : null;
         const objetos = [];
         const lineas = [];
-        const cantidad = cantidadPosible(propios, valoresUnicosUsados);
+        let cantidad = cantidadPosible(propios, valoresUnicosUsados);
+        if (par) cantidad = Math.min(cantidad, tamanos[0] * tamanos[1]);
+        // Índices distintos para cada fila: (i mod a, (i mod a + i div a) mod b)
+        const indiceDe = (attr, i) => {
+            if (!par || !par.includes(attr)) return null;
+            const [a, b] = tamanos;
+            return attr === par[0] ? i % a : ((i % a) + Math.floor(i / a)) % b;
+        };
         for (let i = 0; i < cantidad; i += 1) {
             const objeto = `${base}${i + 1}`;
             objetos.push(objeto);
@@ -291,12 +304,15 @@ export const datosDemo = (nombreApp, entidades, relaciones = [], catalogo = enti
             });
             foraneos.forEach((attr) => {
                 const lista = listaDe.get(attr.referencedEntity);
-                lineas.push(`        ${objeto}.set${capitalizar(aCamel(attr.name))}(${lista}.get(${i} % ${lista}.size()));`);
+                const fijo = indiceDe(attr, i);
+                const indice = fijo === null ? `${i} % ${lista}.size()` : String(fijo);
+                lineas.push(`        ${objeto}.set${capitalizar(aCamel(attr.name))}(${lista}.get(${indice}));`);
             });
             lineas.push('');
         }
         const listaVar = `${base}s`;
         listaDe.set(clase, listaVar);
+        cantidadDe.set(clase, cantidad);
         lineas.push(`        List<${clase}> ${listaVar} = ${repo}.saveAll(List.of(${objetos.join(', ')}));`);
         lineas.push(`        System.out.println("   - ${clase}: " + ${listaVar}.size());`);
         bloques.push(lineas.join('\n'));

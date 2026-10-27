@@ -672,9 +672,15 @@ io.on('connection', (socket) => {
             if (lista.length > MAX_OPS_POR_LOTE) {
                 return responder({ ok: false, demasiadas: true, mensaje: `La tanda tiene más de ${MAX_OPS_POR_LOTE} operaciones.` });
             }
+            // Cambios que hizo la IA local del navegador sin conexión: el historial los anota como
+            // de la IA, pedidos por quien la usó
+            const autorSocket = autorDelSocket(socket);
+            const autor = lote?.origen === 'ia-local' && autorSocket
+                ? { ...autorSocket, nombre: 'IA local', esIA: true, pedidoPor: autorSocket.nombre }
+                : autorSocket;
             return enTurno(sala, () => {
                 if (idLote && loteYaAplicado(sala, idLote)) return responder({ ok: true, duplicado: true });
-                const aplicadas = mutarSala(salaIdNormalizado, sala, lista, autorDelSocket(socket), socket);
+                const aplicadas = mutarSala(salaIdNormalizado, sala, lista, autor, socket);
                 recordarLote(sala, idLote);
                 return responder({ ok: true, aplicadas: aplicadas.length, version: sala.version || 0 });
             });

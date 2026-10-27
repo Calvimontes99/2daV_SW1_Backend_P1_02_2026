@@ -1,4 +1,4 @@
-import { archivoDart, etiquetaCampo, textoDart } from './FlutterNombres.js';
+import { archivoDart, etiquetaCampo, textoDart, etiquetaEntidad } from './FlutterNombres.js';
 import { rutaEntidad } from './NombresReservados.js';
 
 /**
@@ -259,7 +259,7 @@ class ApiConfig {
     generateReadme(entidades = []) {
         const primera = entidades[0];
         const ejemplo = primera ? `/api/${rutaEntidad(primera.name)}` : '/api/...';
-        const lista = entidades.map(e => `- **${etiquetaCampo(e.name)}**: \`lib/screens/${archivoDart(e.name)}_list_screen.dart\``).join('\n');
+        const lista = entidades.map(e => `- **${etiquetaEntidad(e)}**: \`lib/screens/${archivoDart(e.name)}_list_screen.dart\``).join('\n');
         return `# ${this.titulo}
 
 App Flutter generada desde el diagrama de clases. Consume la API REST del

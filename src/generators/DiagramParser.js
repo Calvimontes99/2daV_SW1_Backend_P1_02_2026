@@ -39,7 +39,11 @@ class DiagramParser {
                     stereotype: element.stereotype,
                     isAbstract: element.isAbstract === true || element.stereotype === 'abstract',
                     visibility: element.visibility,
-                    description: element.description || ''
+                    description: element.description || '',
+                    // Nombre tal como se dibujó ("Día") cuando el del código cambió ("Dia")
+                    etiqueta: element.etiqueta,
+                    // Clase de asociación: pares de claves que no se repiten (un enlace por par)
+                    paresUnicos: element.paresUnicos || []
                 });
             }
         }

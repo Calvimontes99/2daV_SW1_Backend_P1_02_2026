@@ -167,6 +167,27 @@ function Paso-Insertar($paso) {
   }
 }
 
+function Paso-Actualizar($paso) {
+  # Completa una fila ya insertada (p. ej. la clase de asociacion, que apunta a su conector)
+  $tabla = [string]$paso.tabla
+  $esquema = Obtener-Esquema $tabla
+  $asignaciones = @()
+  $parametros = New-Object System.Collections.ArrayList
+  foreach ($prop in $paso.valores.PSObject.Properties) {
+    $col = $esquema[$prop.Name.ToLower()]
+    if (-not $col) { throw "La columna $($prop.Name) no existe en $tabla" }
+    $asignaciones += "[$($col.nombre)] = ?"
+    [void]$parametros.Add(@($col, (Resolver $prop.Value)))
+  }
+  $colId = $esquema[([string]$paso.columnaId).ToLower()]
+  $cmd = Nuevo-Comando ("UPDATE [$tabla] SET " + ($asignaciones -join ', ') + " WHERE [$($colId.nombre)] = ?")
+  foreach ($par in $parametros) { Agregar-Parametro $cmd $par[0] $par[1] }
+  Agregar-Parametro $cmd $colId (Resolver $paso.id)
+  try { $filas = $cmd.ExecuteNonQuery() } finally { $cmd.Dispose() }
+  if ($filas -ne 1) { throw "Se esperaba actualizar una fila de $tabla y fueron $filas" }
+  $contador["$tabla (actualizadas)"] = 1 + [int]$contador["$tabla (actualizadas)"]
+}
+
 function Paso-Buscar($paso, [switch]$SoloAvisar) {
   $tabla = [string]$paso.tabla
   $esquema = Obtener-Esquema $tabla
@@ -249,6 +270,7 @@ try {
     }
     switch ([string]$paso.accion) {
       'insertar' { Paso-Insertar $paso }
+      'actualizar' { Paso-Actualizar $paso }
       'buscar' { Paso-Buscar $paso }
       'avisar' { Paso-Buscar $paso -SoloAvisar }
       'ocultarNoListados' { Paso-OcultarNoListados $paso }

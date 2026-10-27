@@ -292,7 +292,17 @@ ${operaciones}
         if (esAbstracta && !this.isParentInInheritance(entity.id)) {
             return '@MappedSuperclass';
         }
-        let annotations = `@Entity\n@Table(name = "${tableName}")`;
+        // Clase de asociación: entre los mismos dos objetos hay un solo enlace
+        const columnaFK = (nombre) => {
+            const base = this.toSnakeCase(nombre);
+            return base.endsWith('_id') ? base : `${base}_id`;
+        };
+        const unicos = (entity.paresUnicos || [])
+            .map(par => `@UniqueConstraint(columnNames = {${par.map(n => `"${columnaFK(n)}"`).join(', ')}})`);
+        const tabla = unicos.length
+            ? `@Table(name = "${tableName}", uniqueConstraints = {${unicos.join(', ')}})`
+            : `@Table(name = "${tableName}")`;
+        let annotations = `@Entity\n${tabla}`;
         if (this.isParentInInheritance(entity.id)) {
             annotations += `\n@Inheritance(strategy = InheritanceType.JOINED)`;
         }

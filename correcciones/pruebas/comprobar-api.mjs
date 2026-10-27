@@ -230,6 +230,23 @@ export async function comprobarApi(caso, entorno = process.env, { ejecutarFlutte
       await comprobarPermisos({ api, pg, configuracion, base });
     }
     if (caso.tema === 'permisos-mn') await comprobarPermisosMN({ api });
+    if (caso.tema === 'clase-asociacion-tildes') {
+      // Clase de asociación Plan entre Ejercicio y Objetivo: un enlace por par
+      const planes = (await api('/plan?pagina=0&tamano=50')).data;
+      assert.ok(planes.length > 0, 'la siembra crea enlaces');
+      assert.equal(new Set(planes.map(p => `${p.ejercicioId}-${p.objetivoId}`)).size, planes.length, 'la siembra no repite pares');
+      const repetido = { series: 3, repeticiones: 10, descripcion: 'repetido', ejercicioId: planes[0].ejercicioId, objetivoId: planes[0].objetivoId };
+      assert.equal((await api('/plan', 'POST', repetido)).estado, 409, 'el mismo par no se enlaza dos veces');
+      const ejercicio = await api('/ejercicio', 'POST', { nombre: 'Ejercicio nuevo' });
+      assert.equal(ejercicio.estado, 201);
+      assert.equal((await api('/plan', 'POST', { ...repetido, ejercicioId: ejercicio.data.id })).estado, 201, 'otro par sí');
+      const sinExtremo = await api('/plan', 'POST', { series: 1, repeticiones: 1, descripcion: 'sin objetivo', ejercicioId: ejercicio.data.id });
+      assert.ok([400, 409].includes(sinExtremo.estado), `un enlace sin uno de sus extremos no existe (${sinExtremo.estado})`);
+      // Nombres sin tildes en las rutas y en la base
+      assert.equal((await api('/dia')).estado, 200);
+      assert.equal((await api('/sesion')).estado, 200);
+      console.log('OK clase de asociación: par único (409), otro par 201, extremos obligatorios; rutas /dia y /sesion.');
+    }
     if (comprobacionesExtra) await comprobacionesExtra({ api, pg, configuracion, base });
     console.log(`OK ${caso.tema}: API, siembra, ${rutas.length} endpoints, permisos, paginación y relaciones. Base conservada: ${base}`);
   } finally {

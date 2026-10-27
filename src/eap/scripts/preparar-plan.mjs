@@ -454,11 +454,20 @@ for (const diag of diagramas) {
     const desde = resolver(r.desde ?? r.origen, [...locales], ctx);
     const hacia = resolver(r.hacia ?? r.destino, [...locales], ctx);
     if (!desde || !hacia) continue;
+    // Clase de asociación (línea punteada hacia la relación): solo en asociaciones entre otras dos clases
+    let claseAsociacion = null;
+    if (r.claseAsociacion != null) {
+      claseAsociacion = resolver(r.claseAsociacion, [...locales], `${ctx}, clase de asociación`);
+      if (claseAsociacion && (tipo !== 'asociacion' || elementos.get(claseAsociacion).tipo !== 'clase' || [desde, hacia].includes(claseAsociacion))) {
+        avisos.push(`${ctx}: "${elementos.get(claseAsociacion).nombre}" no puede ser su clase de asociación (va en una asociación y no en uno de sus extremos); queda como clase común`);
+        claseAsociacion = null;
+      }
+    }
     diag.relaciones.push({
       tipo, desde, hacia, nombre: r.nombre ?? null, etiqueta: r.etiqueta ?? null,
       estereotipo: r.estereotipo ?? null, dirigida: !!r.dirigida,
       multOrigen: r.multOrigen ?? r.cardinalidadOrigen ?? null, multDestino: r.multDestino ?? r.cardinalidadDestino ?? null,
-      rolOrigen: r.rolOrigen ?? null, rolDestino: r.rolDestino ?? null,
+      rolOrigen: r.rolOrigen ?? null, rolDestino: r.rolDestino ?? null, claseAsociacion,
     });
   }
   if (diag.tipo === 'secuencia') {
@@ -1014,7 +1023,7 @@ for (const diag of diagramas) {
   for (const r of diag.relaciones) {
     const grupo = pares.get([r.desde, r.hacia].sort().join('|'));
     const desplazamiento = grupo.length > 1 ? Math.round((grupo.indexOf(r) - (grupo.length - 1) / 2) * diag.separacionParalelas) : 0;
-    const k = `${r.tipo}|${r.desde}|${r.hacia}|${normalizar(r.nombre ?? r.etiqueta ?? '')}|${normalizar(r.estereotipo ?? '')}`;
+    const k = `${r.tipo}|${r.desde}|${r.hacia}|${normalizar(r.nombre ?? r.etiqueta ?? '')}|${normalizar(r.estereotipo ?? '')}|${r.claseAsociacion ?? ''}`;
     let unica = relacionesUnicas.get(k);
     if (!unica) {
       unica = { ...r, guid: guid(), clave: `con:${relacionesUnicas.size}` };
@@ -1023,6 +1032,10 @@ for (const diag of diagramas) {
       const valores = valoresRelacion(unica, ea.receta.ot, eb.receta.ot);
       valores.Start_Object_ID = ref(ea.clave);
       valores.End_Object_ID = ref(eb.clave);
+      // Clase de asociación, como la guarda EA 13 al usar "Association Class": el conector lleva
+      // SubType "Class" y el id de la clase en PDATA1; la clase, NType 17 y el id del conector en PDATA4
+      const claseAsociacion = unica.claseAsociacion && elementos.get(unica.claseAsociacion);
+      if (claseAsociacion) Object.assign(valores, { SubType: 'Class', PDATA1: refTexto(claseAsociacion.clave), DestIsNavigable: false });
       if ((ea.reutilizar || eb.reutilizar) && unica.tipo !== 'nota') {
         pasos.push({
           accion: 'buscar', siAmbosExistentes: [ea.clave, eb.clave], tabla: 't_connector', columnaId: 'Connector_ID', columnaGuid: 'ea_guid', clave: unica.clave,
@@ -1031,6 +1044,13 @@ for (const diag of diagramas) {
       }
       pasos.push({ accion: 'insertar', siNoExiste: unica.clave, tabla: 't_connector', columnaId: 'Connector_ID', clave: unica.clave, valores });
       if (valores.Stereotype) pasos.push(xrefEstereotipo(unica.clave, valores.Stereotype, 'connector property'));
+      // Cada lado apunta al otro: la clase se completa recién cuando el conector tiene id
+      if (claseAsociacion) {
+        pasos.push({
+          accion: 'actualizar', tabla: 't_object', columnaId: 'Object_ID', id: ref(claseAsociacion.clave),
+          valores: { NType: 17, PDATA4: refTexto(unica.clave) },
+        });
+      }
       conteo.relaciones++;
     }
     const pa = diag.pos.get(r.desde), pb = diag.pos.get(r.hacia);

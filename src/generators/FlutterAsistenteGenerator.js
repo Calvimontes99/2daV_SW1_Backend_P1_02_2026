@@ -7,7 +7,7 @@
  *   2. Con internet, si el pedido no encaja en esas respuestas, pregunta al backend
  *      (endpoint /api/asistente), que habla con el servicio de IA configurado.
  */
-import { archivoDart, atributoDescriptivo, campoJava, claveDeAtributo, etiquetaCampo, nombreClase, textoDart } from './FlutterNombres.js';
+import { archivoDart, atributoDescriptivo, campoJava, claveDeAtributo, etiquetaCampo, nombreClase, textoDart, etiquetaEntidad } from './FlutterNombres.js';
 
 const tipoLegible = (attr) => ({
     String: 'texto', Integer: 'número entero', Long: 'número entero', Double: 'número decimal',
@@ -19,9 +19,9 @@ const tipoLegible = (attr) => ({
 const catalogoDart = (entidades, atributosDe) => entidades.map((e) => {
     const campos = atributosDe(e)
         .filter((a) => !a.isPrimaryKey)
-        .map((a) => `      _Campo('${textoDart(etiquetaCampo(claveDeAtributo(a)))}', '${textoDart(tipoLegible(a))}', ${a.isForeignKey ? 'true' : 'false'})`);
+        .map((a) => `      _Campo('${textoDart(a.etiqueta || etiquetaCampo(claveDeAtributo(a)))}', '${textoDart(tipoLegible(a))}', ${a.isForeignKey ? 'true' : 'false'})`);
     return `    _Clase(
-      nombre: '${textoDart(etiquetaCampo(e.name))}',
+      nombre: '${textoDart(etiquetaEntidad(e))}',
       clave: '${textoDart(campoJava(e.name).toLowerCase())}',
       campos: [
 ${campos.join(',\n') || ''}
